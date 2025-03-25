@@ -1,6 +1,5 @@
 # DS-340W-Project 
-Parent Paper: Detecting Fake Job Postings Using Bidirectional LSTM                                                                                                           
-https://paperswithcode.com/paper/detecting-fake-job-postings-using
-
+A machine learning approach to detecting fraudulent job types
+https://link.springer.com/article/10.1007/s00146-022-01469-0
 
 
