@@ -44,8 +44,17 @@ import sklearn
 import spacy
 import sqlite3
 import string
-
-
+#From helper file
+from influence_pruning import (
+    batched_influence_pruning,
+    approx_inverse_hessian,
+)
+#For the dataset pruning algorithm
+from torch.utils.data import Dataset, DataLoader
+from transformers import BertTokenizer
+import torch.nn as nn
+import torch
+from torch.utils.data import Subset
 
 def get_classification_results(models, classifiers, cm=False):
     classification_results = []
@@ -122,29 +131,112 @@ if __name__ == "__main__":
     Data Processing
     """
 
-    # Load annotated data from CSV
+    #Loading the base EMSCAD Dataset
     df = pd.read_csv('fake_job_postings.csv')
-    
+
+    df = df.drop(columns=['job_id'])
+
+    #Deep Learning Pretrained models
+    model_args = {
+        'num_train_epochs': 5,
+        'max_seq_length': 256,
+        'train_batch_size': 16,
+        'eval_batch_size': 64,
+        'warmup_steps': 500,
+        'weight_decay': 0.01,
+        'logging_steps': 10,
+        'learning_rate': 5e-5,
+        'fp16': False,
+        'no_cache': True,
+        'overwrite_output_dir': True
+    }
+    trans_model_bert = ClassificationModel('bert', 'bert-base-cased', num_labels=4, use_cuda=False, args=model_args)
+    trans_model_roberta = ClassificationModel('roberta', 'roberta-base', num_labels=4, use_cuda=False, args=model_args)
+    trans_model_xlnet = ClassificationModel('xlnet', 'xlnet-base-cased', num_labels=4, use_cuda=False, args=model_args)
+
+###Dataset Pruning Test
+    #Prepare Dataset class for BERT
+    class JobDataset(Dataset):
+        def __init__(self, texts, labels, tokenizer, max_len=256):
+            self.texts = texts
+            self.labels = labels
+            self.tokenizer = tokenizer
+            self.max_len = max_len
+
+        def __len__(self):
+            return len(self.texts)
+
+        def __getitem__(self, item):
+            encoded = self.tokenizer(
+                self.texts[item],
+                max_length=self.max_len,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            )
+            return {
+                "input_ids": encoded["input_ids"].squeeze(),
+                "attention_mask": encoded["attention_mask"].squeeze(),
+                "labels": torch.tensor(self.labels[item], dtype=torch.long)
+            }
+    #Tokenizer and dataset reduction for testing
+    tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
+
+    df_pruned = df
+
+###For subsetting the dataset
+    """
+    #Split the dataset to preserve class ratio
     df_real = df[df["type"] == 0]  # Real (non-fake) cases
     df_fake = df[df["type"] == 1]  # Fake cases
-
-    # Randomly sample 20% of real job postings to keep (i.e., prune 80%)
-    df_real_sampled = df_real.sample(frac=0.4, random_state=42)
-
-    # Combine the sampled real cases with all fake cases
-    df_pruned = pd.concat([df_real_sampled, df_fake])
+    #Sample a fraction from each
+    df_real_sampled = df_real.sample(frac=.05, random_state=42)
+    df_fake_sampled = df_fake.sample(frac=.05, random_state=42)
+    #Merge the subsets to create a new dataset
+    df_pruned = pd.concat([df_real_sampled, df_fake_sampled])
+    #Shuffle the dataset
     df_pruned = df_pruned.sample(frac=1, random_state=42).reset_index(drop=True)
+    df_pruned['type'].value_counts()
+    df_pruned['text'] = df_pruned['text'].apply(str)
+    """
 
-    print(len(df_pruned))
 
-    # Shuffle the dataset
+    #Preparing it for the JobDataset Class
+    texts = df_pruned['text'].tolist()
+    labels = df_pruned['type'].tolist()
+    df_temp = pd.DataFrame({'text': texts, 'label': labels})
+    stratified_subset = df_temp
+    # Rebuild the dataset using the stratified subset
+    subset_dataset = JobDataset(
+        stratified_subset['text'].astype(str).tolist(), 
+        stratified_subset['label'].tolist(), 
+        tokenizer
+    )
+    loader = DataLoader(subset_dataset, batch_size=1)
+
+    #Getting gradients
+    loss_fn = nn.CrossEntropyLoss()
+    model_bert = trans_model_bert.model  # Use the actual transformer model inside ClassificationModel
+    model_bert.eval()
+    H_inv = approx_inverse_hessian(model_bert, loader, loss_fn)
+
+    #Influence and pruning combined, batched into sets of 100 so that memory limits can be accounted for
+    selected_indices = batched_influence_pruning(model_bert, full_dataset=subset_dataset, loss_fn=loss_fn, H_inv=H_inv, batch_size=100, epsilon=.2)
+
+    #Creating the new DataFrame
+    df_pruned = df.iloc[selected_indices].reset_index(drop=True)
+    #Saving the new DataFrame so this step can be skipped in the future
+    df_pruned.to_csv('pruned_fake_job_postings.csv', index=False)
+
+### End of implemented pruning
+
+
+    #Shuffle the dataset again
     combined_jobs_upsampled = df_pruned.sample(frac=1, random_state=42).reset_index(drop=True)
-
     combined_jobs_upsampled['type'].value_counts()
     combined_jobs_upsampled['text'] = combined_jobs_upsampled['text'].apply(str)
 
-
-    # Load NLTK and spaCy libraries
+    #Load NLTK and spaCy libraries
     nltk.download('stopwords')
     nltk.download('words')
 
@@ -378,9 +470,11 @@ if __name__ == "__main__":
     df_no_pos.drop(['telecommuting', 'has_no_company_profile'], axis=1, inplace=True)
     df_pos.drop(['telecommuting', 'has_no_company_profile'], axis=1, inplace=True)
 
+
+    print(df_bow.columns)
     # Combining Ruleset+POS with Tf-Idf / BoW Models
-    df_bow = df_bow.drop(['fraudulent', 'type'], axis=1)
-    df_tfidf = df_tfidf.drop(['fraudulent', 'type'], axis=1)
+    #df_bow = df_bow.drop(['fraudulent', 'type'], axis=1)
+    #df_tfidf = df_tfidf.drop(['fraudulent', 'type'], axis=1)
 
     df_pos_bow = pd.concat([df_pos.reset_index(drop=True), df_bow.reset_index(drop=True)], axis=1)
     df_pos_tfidf = pd.concat([df_pos.reset_index(drop=True), df_tfidf.reset_index(drop=True)], axis=1)
@@ -520,6 +614,11 @@ if __name__ == "__main__":
     df_embed_ruleset_train.columns = df_embed_ruleset_train.columns.astype(str)
     df_embed_ruleset_test.columns = df_embed_ruleset_test.columns.astype(str)
 
+
+
+    #Testing pruning
+    """
+
     # Evaluating the Word2Vec and CombinedWord2vec Models
     for name, model in classifiers:
         model_fit = model.fit(df_embed_train, y_train_embed.values.ravel())
@@ -553,7 +652,7 @@ if __name__ == "__main__":
 
     grid_search.best_params_
 
-    print("After Grid")
+    """
 
     # RF Hyperparameter Tuning: Ruleset + Embeddings
     clf_rf_combined = RandomForestClassifier(random_state=42, criterion='entropy',
@@ -592,28 +691,12 @@ if __name__ == "__main__":
     test_data_tf['text'] = X_test_trans
     test_data_tf['labels'] = y_test_trans
 
-    model_args = {
-        'num_train_epochs': 5,
-        'max_seq_length': 256,
-        'train_batch_size': 16,
-        'eval_batch_size': 64,
-        'warmup_steps': 500,
-        'weight_decay': 0.01,
-        'logging_steps': 10,
-        'learning_rate': 5e-5,
-        'fp16': False,
-        'no_cache': True,
-        'overwrite_output_dir': True
-    }
 
     print("Before Bert")
 
     # Training and Evaluating BERT
 
-    trans_model_bert = ClassificationModel('bert', 'bert-base-cased', num_labels=4, use_cuda=False, args=model_args)
-    trans_model_roberta = ClassificationModel('roberta', 'roberta-base', num_labels=4, use_cuda=False, args=model_args)
-    trans_model_xlnet = ClassificationModel('xlnet', 'xlnet-base-cased', num_labels=4, use_cuda=False, args=model_args)
-
+    
     trans_model_bert.train_model(train_data_tf)
     result_bert, model_outputs_bert, wrong_predictions_bert = trans_model_bert.eval_model(test_data_tf,
                                                                                         acc=sklearn.metrics.accuracy_score,
