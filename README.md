@@ -9,6 +9,7 @@ Runtime Instructions
 #install python 3.10.11 from https://www.python.org/downloads/
 #This code must be run in a python 3.10.11 environment
 
+#Run the following code blocks in terminal to download dependencies
 python -m venv group39
 pip install --upgrade pip
 
