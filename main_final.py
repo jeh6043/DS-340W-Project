@@ -59,13 +59,11 @@ from torch.utils.data import Subset
 def get_classification_results(models, classifiers, cm=False):
     classification_results = []
     for model_name, model in models:
-        target = df_clean['type'].copy()
-        target.columns = ["type", "fake"]
+        target = df_clean['fraudulent'].copy()
+        target.columns = ['fraudulent']
         target = target.astype(int)
         if 'fraudulent' in model.columns:
-            features = model.drop(['fraudulent', 'type'], axis=1)
-        else:
-            features = model.drop(['type'], axis=1)
+            features = model.drop(['fraudulent'], axis=1)
         X_train_clf, X_test_clf, y_train_clf, y_test_clf = train_test_split(features, target, test_size=0.2, stratify=target, random_state=42)
 
         for name, classifier in classifiers:
@@ -101,13 +99,11 @@ if __name__ == "__main__":
         classification_results = []
 
         for model_name, model in models:
-            target = df_clean['type'].copy()
-            target.columns = ["type", "fake"]
+            target = df_clean['fraudulent'].copy()
+            target.columns = ["fake"]
             target = target.astype(int)
             if 'fraudulent' in model.columns:
-                features = model.drop(['fraudulent', 'type'], axis=1)
-            else:
-                features = model.drop(['type'], axis=1)
+                features = model.drop(['fraudulent'], axis=1)
             X_train_clf, X_test_clf, y_train_clf, y_test_clf = train_test_split(features, target, test_size=0.2,
                                                                                 stratify=target, random_state=42)
 
@@ -185,10 +181,9 @@ if __name__ == "__main__":
     df_pruned = df
 
 ###For subsetting the dataset
-    """
     #Split the dataset to preserve class ratio
-    df_real = df[df["type"] == 0]  # Real (non-fake) cases
-    df_fake = df[df["type"] == 1]  # Fake cases
+    df_real = df[df['fraudulent'] == 0]  # Real (non-fake) cases
+    df_fake = df[df['fraudulent'] == 1]  # Fake cases
     #Sample a fraction from each
     df_real_sampled = df_real.sample(frac=.05, random_state=42)
     df_fake_sampled = df_fake.sample(frac=.05, random_state=42)
@@ -196,19 +191,17 @@ if __name__ == "__main__":
     df_pruned = pd.concat([df_real_sampled, df_fake_sampled])
     #Shuffle the dataset
     df_pruned = df_pruned.sample(frac=1, random_state=42).reset_index(drop=True)
-    df_pruned['type'].value_counts()
-    df_pruned['text'] = df_pruned['text'].apply(str)
+    df_pruned['description'] = df_pruned['description'].apply(str)
+
     """
-
-
     #Preparing it for the JobDataset Class
-    texts = df_pruned['text'].tolist()
-    labels = df_pruned['type'].tolist()
-    df_temp = pd.DataFrame({'text': texts, 'label': labels})
+    texts = df_pruned['description'].tolist()
+    labels = df_pruned['fraudulent'].tolist()
+    df_temp = pd.DataFrame({'description': texts, 'label': labels})
     stratified_subset = df_temp
     # Rebuild the dataset using the stratified subset
     subset_dataset = JobDataset(
-        stratified_subset['text'].astype(str).tolist(), 
+        stratified_subset['description'].astype(str).tolist(), 
         stratified_subset['label'].tolist(), 
         tokenizer
     )
@@ -229,12 +222,12 @@ if __name__ == "__main__":
     df_pruned.to_csv('pruned_fake_job_postings.csv', index=False)
 
 ### End of implemented pruning
-
+    """
 
     #Shuffle the dataset again
     combined_jobs_upsampled = df_pruned.sample(frac=1, random_state=42).reset_index(drop=True)
-    combined_jobs_upsampled['type'].value_counts()
-    combined_jobs_upsampled['text'] = combined_jobs_upsampled['text'].apply(str)
+    combined_jobs_upsampled['fraudulent'].value_counts()
+    combined_jobs_upsampled['description'] = combined_jobs_upsampled['description'].apply(str)
 
     #Load NLTK and spaCy libraries
     nltk.download('stopwords')
@@ -262,7 +255,7 @@ if __name__ == "__main__":
 
     # Creating a dataframe of cleaned job advertisements
     df_clean = combined_jobs_upsampled.copy()
-    df_clean['text'] = process_text(df_clean['text'])
+    df_clean['description'] = process_text(df_clean['description'])
 
 
     """
@@ -277,15 +270,15 @@ if __name__ == "__main__":
     tfidf_vectorizer = sklearn.feature_extraction.text.TfidfVectorizer(stop_words="english", lowercase=False)
 
     # Fitting on the cleaned text
-    vectorized_bow = count_vectorizer.fit_transform(df_pre_bow['text'])
-    vectorized_tfidf = tfidf_vectorizer.fit_transform(df_pre_bow['text'])
+    vectorized_bow = count_vectorizer.fit_transform(df_pre_bow['description'])
+    vectorized_tfidf = tfidf_vectorizer.fit_transform(df_pre_bow['description'])
 
     # Finalising the dataframe with tfidf and bow vectors
     df_bow = pd.DataFrame(vectorized_bow.todense(), columns=count_vectorizer.get_feature_names_out()) #switched to get_feature_names_out suffix for 1.0 update
-    df_bow = pd.concat([df_bow, df_clean['type']], axis=1, join="inner")
+    df_bow = pd.concat([df_bow, df_clean['fraudulent']], axis=1, join="inner")
 
     df_tfidf = pd.DataFrame(vectorized_tfidf.todense(), columns=tfidf_vectorizer.get_feature_names_out())
-    df_tfidf = pd.concat([df_tfidf, df_clean['type']], axis=1, join="inner")
+    df_tfidf = pd.concat([df_tfidf, df_clean['fraudulent']], axis=1, join="inner")
 
     models_class1 = []
     models_class1.append(('1: BOW', df_bow))
@@ -384,7 +377,7 @@ if __name__ == "__main__":
 
     # Extract Feature: Has Short Description       
     short_descriptions = []
-    for desc in tqdm(df_ruleset['text']):            #description to text
+    for desc in tqdm(df_ruleset['description']):            #description to text
         if len(str(desc)) < 10:
             short_descriptions.append(1)
         else:
@@ -403,30 +396,30 @@ if __name__ == "__main__":
     df_ruleset['has_short_requirements'] = pd.Series(short_requirements)
 
     # Extract Feature: Contains Spam Word
-    df_ruleset['contains_spamword'] = are_words_in_field(df_ruleset['text'],
+    df_ruleset['contains_spamword'] = are_words_in_field(df_ruleset['description'],
                                                         ['home', 'online', 'week', 'income', 'extra', 'cash'])
 
     # Extract Feature: Consecutive Punctuation
-    df_ruleset['consecutive_punct'] = get_consecutive_punctuation(df_ruleset['text'])
+    df_ruleset['consecutive_punct'] = get_consecutive_punctuation(df_ruleset['description'])
 
     # Extract Feature: Has Money Symbols in Title
     df_ruleset['money_in_title'] = are_words_in_field(df_ruleset['title'],
                                                     ['$', '$$', '$$$', '€', '€€', '€€€', '£', '££', '£££'])
 
     # Extract Feature: Has Money Symbols in Description
-    df_ruleset['money_in_description'] = are_words_in_field(df_ruleset['text'],
+    df_ruleset['money_in_description'] = are_words_in_field(df_ruleset['description'],
                                                             ['$', '$$', '$$$', '€', '€€', '€€€', '£', '££', '£££'])
 
     # Extract Feature: Has URL in Text
-    df_ruleset['url_in_text'] = is_word_in_field(df_ruleset['text'], "url")
+    df_ruleset['url_in_text'] = is_word_in_field(df_ruleset['description'], "url")
 
     # Extract Feature: Prompts for External Application
-    df_ruleset['external_application'] = are_words_in_field(df_ruleset['text'],
+    df_ruleset['external_application'] = are_words_in_field(df_ruleset['description'],
                                                             ['apply at', 'send resume', 'send your resume', 'contact us',
                                                             'call me', 'call us'])
 
     # Extract Feature: Addresses Lower Education
-    df_ruleset['addresses_lower_education'] = are_words_in_field(df_ruleset['text'], ['high school', 'no degree'])
+    df_ruleset['addresses_lower_education'] = are_words_in_field(df_ruleset['description'], ['high school', 'no degree'])
 
     # Extract Feature: Has Incomplete Extra Attributes
     extra_cols = ['industry', 'function', 'employment_type', 'required_education']
@@ -434,25 +427,25 @@ if __name__ == "__main__":
 
     # Extract Feature: POS Tags
     df_pos = df_ruleset.copy()
-    df_pos['noun_count'] = df_pos['text'].progress_apply(lambda x: get_pos_tags(x, 'NOUN'))
-    df_pos['verb_count'] = df_pos['text'].progress_apply(lambda x: get_pos_tags(x, 'VERB'))
-    df_pos['adj_count'] = df_pos['text'].progress_apply(lambda x: get_pos_tags(x, 'ADJ'))
-    df_pos['adv_count'] = df_pos['text'].progress_apply(lambda x: get_pos_tags(x, 'ADV'))
-    df_pos['pron_count'] = df_pos['text'].progress_apply(lambda x: get_pos_tags(x, 'PRON'))
+    df_pos['noun_count'] = df_pos['description'].progress_apply(lambda x: get_pos_tags(x, 'NOUN'))
+    df_pos['verb_count'] = df_pos['description'].progress_apply(lambda x: get_pos_tags(x, 'VERB'))
+    df_pos['adj_count'] = df_pos['description'].progress_apply(lambda x: get_pos_tags(x, 'ADJ'))
+    df_pos['adv_count'] = df_pos['description'].progress_apply(lambda x: get_pos_tags(x, 'ADV'))
+    df_pos['pron_count'] = df_pos['description'].progress_apply(lambda x: get_pos_tags(x, 'PRON'))
 
     # Finalising the Ruleset Models
     df_no_pos = df_ruleset.copy()
     df_pos.drop(['company_profile', 'requirements', 'benefits', 'title', 'department', 'salary_range', 'location',
                 'employment_type', 'required_experience', 'required_education', 'industry',
-                'function', 'fraudulent', 'text'], axis=1, inplace=True)
+                'function', 'description'], axis=1, inplace=True)
     df_no_pos.drop(['company_profile', 'requirements', 'benefits', 'title', 'department', 'salary_range', 'location',
                     'employment_type', 'required_experience', 'required_education', 'industry',
-                    'function', 'fraudulent', 'text'], axis=1, inplace=True)
+                    'function', 'description'], axis=1, inplace=True)
 
     print(df_no_pos.columns)
 
     # Feature Correlations
-    df_no_pos_correlations = pd.concat([df_no_pos.drop(['type'], axis=1), pd.get_dummies(df_no_pos['type'])], axis=1)
+    df_no_pos_correlations = pd.concat([df_no_pos.drop(['fraudulent'], axis=1), pd.get_dummies(df_no_pos['fraudulent'])], axis=1)
 
     plt.figure(figsize=(15, 12))
     correlations = df_no_pos_correlations.corr()
@@ -473,8 +466,8 @@ if __name__ == "__main__":
 
     print(df_bow.columns)
     # Combining Ruleset+POS with Tf-Idf / BoW Models
-    #df_bow = df_bow.drop(['fraudulent', 'type'], axis=1)
-    #df_tfidf = df_tfidf.drop(['fraudulent', 'type'], axis=1)
+    #df_bow = df_bow.drop(['fraudulent'], axis=1)
+    #df_tfidf = df_tfidf.drop(['fraudulent'], axis=1)
 
     df_pos_bow = pd.concat([df_pos.reset_index(drop=True), df_bow.reset_index(drop=True)], axis=1)
     df_pos_tfidf = pd.concat([df_pos.reset_index(drop=True), df_tfidf.reset_index(drop=True)], axis=1)
@@ -488,10 +481,10 @@ if __name__ == "__main__":
     get_classification_results(models_class2, classifiers)
 
     # RF Feature Importance
-    target = df_clean['type'].copy()
-    target.columns = ["type", "fake"]
+    target = df_clean['fraudulent'].copy()
+    target.columns = ['fraudulent']
     target = target.astype(int)
-    features = df_pos.drop(['type'], axis=1)
+    features = df_pos.drop(['fraudulent'], axis=1)
 
     X_train_rf, X_test_rf, y_train_rf, y_test_rf = train_test_split(features, target, test_size=0.2,
                                                                     stratify=target, random_state=42)
@@ -562,24 +555,24 @@ if __name__ == "__main__":
         return feature_vecs
 
     # Creating the training and testing sets for the embeddings
-    target_embed = combined_jobs_upsampled['type'].copy()
-    target_embed.columns = ["type", "fake"]
+    target_embed = combined_jobs_upsampled['fraudulent'].copy()
+    target_embed.columns = ['fraudulent']
     target_embed = target_embed.astype(int)
-    features_embed = combined_jobs_upsampled['text']
+    features_embed = combined_jobs_upsampled['description']
     X_train_embed, X_test_embed, y_train_embed, y_test_embed = train_test_split(features_embed, target_embed, test_size=0.2,
                                                                                 stratify=target_embed, random_state=42)
 
     train_data_embed = pd.DataFrame()
     test_data_embed = pd.DataFrame()
 
-    train_data_embed['text'] = X_train_embed
+    train_data_embed['description'] = X_train_embed
     train_data_embed['labels'] = y_train_embed
 
-    test_data_embed['text'] = X_test_embed
+    test_data_embed['description'] = X_test_embed
     test_data_embed['labels'] = y_test_embed
 
     train_sentences = []  # Initialize an empty list of sentences
-    for doc in train_data_embed['text']:
+    for doc in train_data_embed['description']:
         train_sentences += doc_to_sentences(doc, tokenizer)
 
     # Training the word2vec model
@@ -587,8 +580,8 @@ if __name__ == "__main__":
                                 vector_size=300, min_count=40,
                                 window=10, sample=1e-3)
 
-    train_words_processed = process_text(train_data_embed['text'])
-    test_words_processed = process_text(test_data_embed['text'])
+    train_words_processed = process_text(train_data_embed['description'])
+    test_words_processed = process_text(test_data_embed['description'])
 
     cleaned_train_text = []
     cleaned_test_text = []
@@ -674,21 +667,21 @@ if __name__ == "__main__":
     transformers_logger.setLevel(logging.WARNING)
 
     data_tf = pd.DataFrame()
-    data_tf['text'] = combined_jobs_upsampled['text']
-    data_tf['value'] = combined_jobs_upsampled['type']
+    data_tf['description'] = combined_jobs_upsampled['description']
+    data_tf['value'] = combined_jobs_upsampled['fraudulent']
 
     target_trans = data_tf['value'].copy()
-    features_trans = data_tf['text'].copy()
+    features_trans = data_tf['description'].copy()
     X_train_trans, X_test_trans, y_train_trans, y_test_trans = train_test_split(features_trans, target_trans, test_size=0.2,
                                                                                 stratify=target_trans, random_state=42)
 
     train_data_tf = pd.DataFrame()
     test_data_tf = pd.DataFrame()
 
-    train_data_tf['text'] = X_train_trans
+    train_data_tf['description'] = X_train_trans
     train_data_tf['labels'] = y_train_trans
 
-    test_data_tf['text'] = X_test_trans
+    test_data_tf['description'] = X_test_trans
     test_data_tf['labels'] = y_test_trans
 
 
