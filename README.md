@@ -28,3 +28,6 @@ pip install `
   spacy==3.8.4 `
   nltk==3.8.1 `
   numpy==1.26.4
+
+python -m spacy download en_core_web_lg
+
